@@ -17,6 +17,9 @@ Through a series of assignments and a final project, students develop hands-on e
 
 ---
 
+## Project
+- Project repo : https://github.com/khwaab23/InfoVizProject
+
 ## Assignments
 
 ### Assignment 1: Expository Visualization
