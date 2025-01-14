@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Market Valuation Bar Chart</title>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+            color: #ffa726;
+            font-size: 2.5em;
+        }
+        #chart-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px;
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0px 0px 25px rgba(0, 0, 0, 0.7);
+        }
+        .tooltip {
+            position: absolute;
+            background-color: #333;
+            color: #ffffff;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #777;
+            box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.7);
+            pointer-events: none;
+        }
+        #controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .bar {
+            fill: #ffa726;
+            transition: fill 0.3s ease;
+        }
+        .bar:hover {
+            fill: #ffcc80;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stock Market Valuation Bar Chart Animation</h1>
+    <div id="chart-container"><div id="chart"></div></div>
+    <script>
+        // Initial list of tickers to represent
+        let tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "BRK-B", "JNJ", "V"];
+
+        // Set dimensions and margins
+        const margin = { top: 20, right: 30, bottom: 60, left: 100 };
+        const width = 900 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Create scales
+        const xScale = d3.scaleBand().range([0, width]).padding(0.1);
+        const yScale = d3.scaleLinear().range([height, 0]);
+
+        // Create axes
+        const xAxis = d3.axisBottom(xScale);
+        const yAxis = d3.axisLeft(yScale).tickFormat(d => `$${(d / 1e9).toFixed(1)}B`);
+
+        svg.append("g")
+            .attr("class", "x-axis")
+            .attr("transform", `translate(0,${height})`);
+
+        svg.append("g")
+            .attr("class", "y-axis");
+
+        // Tooltip setup
+        const tooltip = d3.select("body").append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+        // Global variable to hold the year index
+        let yearIndex = 0;
+        let interval;
+
+        
+
+        // Function to load data and update chart
+        async function loadData() {
+            let stockData = [];
+
+            for (let ticker of tickers) {
+                try {
+                    // Adjusting to replace both '.' and '-' with '_'
+                    let response = await fetch(`${ticker.toLowerCase().replace(/\.|-/g, '_')}_data.json`);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch data for ${ticker}`);
+                    }
+                    let data = await response.json();
+                    let tickerData = data.map(d => {
+                        return {
+                            ticker: ticker,
+                            date: new Date(d.date),
+                            market_valuation: +d.market_valuation
+                        };
+                    });
+                    stockData.push(...tickerData);
+                } catch (error) {
+                    console.error(error);
+                }
+            }
+
+            // Set the domains for the scales
+            xScale.domain(tickers);
+            yScale.domain([0, d3.max(stockData, d => d.market_valuation) * 1.1]);
+
+            // Update axes
+            svg.select(".x-axis").transition().duration(1000).call(xAxis);
+            svg.select(".y-axis").transition().duration(1000).call(yAxis);
+
+            // Group the data by year
+            let yearData = d3.groups(stockData, d => d.date.getFullYear());
+
+            function updateChart() {
+                // Update the year value in the year card
+                d3.select("#year-value").text(yearData[yearIndex][0]);
+                if (yearIndex >= yearData.length) {
+                    yearIndex = 0;
+                }
+
+
+
+                let currentYearData = yearData[yearIndex][1].filter(d => tickers.includes(d.ticker));
+                yearIndex++;
+                svg.select(".x-axis").transition().duration(1000).call(xAxis)
+                    .selectAll("text")
+                    .style("text-anchor", "end")
+                    .attr("dx", "-0.8em")
+                    .attr("dy", "0.15em")
+                    .attr("transform", "rotate(-45)");
+                svg.select(".y-axis").transition().duration(1000).call(yAxis);
+
+
+                // Sort data by market valuation to adjust rank
+                currentYearData.sort((a, b) => b.market_valuation - a.market_valuation);
+                xScale.domain(currentYearData.map(d => d.ticker));
+
+                // Update bars
+                const bars = svg.selectAll(".bar")
+                    .data(currentYearData, d => d.ticker);
+
+                // Enter new bars
+                bars.enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("x", d => xScale(d.ticker))
+                    .attr("y", height)
+                    .attr("width", xScale.bandwidth())
+                    .attr("height", 0)
+                    .attr("fill", "#ffa726")
+                    .on("mouseover", function(event, d) {
+                        tooltip.transition().duration(200).style("opacity", 0.9);
+                        tooltip.html(`<strong>${d.ticker}</strong><br>Year: ${d.date.getFullYear()}<br>Market Valuation: $${(d.market_valuation / 1e9).toFixed(1)}B`)
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 30) + "px");
+                    })
+                    .on("mouseout", function() {
+                        tooltip.transition().duration(500).style("opacity", 0);
+                    })
+                    .transition()
+                    .duration(1000)
+                    .attr("y", d => yScale(d.market_valuation))
+                    .attr("height", d => height - yScale(d.market_valuation));
+
+                    
+
+                // Update existing bars
+                bars.transition()
+                    .duration(1000)
+                    .attr("x", d => xScale(d.ticker))
+                    .attr("y", d => yScale(d.market_valuation))
+                    .attr("width", xScale.bandwidth())
+                    .attr("height", d => height - yScale(d.market_valuation));
+
+                // Remove old bars
+                bars.exit()
+                    .transition()
+                    .duration(1000)
+                    .attr("y", height)
+                    .attr("height", 0)
+                    .remove();
+            }
+
+            // Clear any existing interval to prevent multiple intervals running simultaneously
+            if (interval) {
+                clearInterval(interval);
+            }
+
+            // Start the animation
+            interval = d3.interval(updateChart, 1500);
+            updateChart();
+        }
+
+        // Load data and initialize chart
+        loadData();
+    </script>
+<div id="year-kpi" style="position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%); background-color: #2b2b2b; color: #ffa726; padding: 15px; border-radius: 10px; font-size: 1.5em; box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.7);">
+
+        Year: <span id="year-value"></span>
+    </div>
+</body>
+</html>
