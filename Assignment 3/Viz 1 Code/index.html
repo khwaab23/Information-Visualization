@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Price Candlestick Chart</title>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #0d1b2a;
+            color: #e0e1dd;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+            color: #ff8906;
+        }
+        #chart-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px;
+            background-color: #1b263b;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.7);
+        }
+        .axis-label {
+            font-size: 12px;
+            font-weight: bold;
+            fill: #e0e1dd;
+        }
+        .gridline {
+            stroke: #415a77;
+            stroke-opacity: 0.3;
+            shape-rendering: crispEdges;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: #1b263b;
+            color: #e0e1dd;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ff8906;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+        #controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            margin: 20px auto;
+            width: 80%;
+            padding: 15px;
+            background-color: #1b263b;
+            border-radius: 10px;
+            box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.7);
+        }
+        .selectors, .buttons {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #ff8906;
+            color: #0d1b2a;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #f25c05;
+        }
+        select {
+            background-color: #415a77;
+            color: #e0e1dd;
+            border: none;
+            padding: 5px;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        .candlestick {
+            stroke-width: 1;
+        }
+        .candle-body {
+            stroke-width: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stock Price Candlestick Chart</h1>
+    <div id="controls">
+        <div class="selectors">
+            <label for="stock-selector">Select Stock: </label>
+            <select id="stock-selector">
+                <option value="AAPL" selected>AAPL</option>
+                <option value="MSFT">MSFT</option>
+                <option value="GOOGL">GOOGL</option>
+                <option value="AMZN">AMZN</option>
+                <option value="META">META</option>
+                <option value="TSLA">TSLA</option>
+                <option value="NVDA">NVDA</option>
+                <option value="BRK.B">BRK.B</option>
+                <option value="JNJ">JNJ</option>
+                <option value="V">V</option>
+            </select>
+            <label for="timeframe-selector">Select Timeframe: </label>
+            <select id="timeframe-selector">
+                <option value="3M">3 Months</option>
+                <option value="6M">6 Months</option>
+                <option value="1Y" selected>1 Year</option>
+            </select>
+        </div>
+        <div class="buttons">
+            <button id="zoom-in">Zoom In</button>
+            <button id="zoom-out">Zoom Out</button>
+            <button id="reset-zoom">Reset Zoom</button>
+        </div>
+    </div>
+    <div id="chart-container"><div id="chart"></div></div>
+    <script>
+        async function loadData(ticker) {
+            const response = await fetch(`${ticker.toLowerCase()}_data.json`);
+            const data = await response.json();
+            return data;
+        }
+
+        // Set dimensions and margins
+        const margin = { top: 20, right: 30, bottom: 80, left: 60 };
+        const width = 900 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const parseDate = d3.timeParse("%Y-%m-%d");
+
+        // Setup scales
+        let xScale = d3.scaleTime().range([0, width]);
+        let yScale = d3.scaleLinear().range([height, 0]);
+
+        // Create axes
+        let xAxis = d3.axisBottom(xScale).ticks(d3.timeMonth.every(1)).tickFormat(d3.timeFormat("%b %Y"));
+        let yAxis = d3.axisLeft(yScale);
+
+        // Tooltip setup
+        const tooltip = d3.select("body").append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+        // Zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([1, 10])
+            .translateExtent([[0, 0], [width, height]])
+            .extent([[0, 0], [width, height]])
+            .on("zoom", zoomed);
+
+        svg.append("rect")
+            .attr("width", width)
+            .attr("height", height)
+            .style("fill", "none")
+            .style("pointer-events", "all")
+            .call(zoom);
+
+        // Function to update chart
+        async function updateChart(stock, timeframe) {
+            let data = await loadData(stock);
+
+            // Filter data based on timeframe
+            let endDate = parseDate(data[data.length - 1].date);
+            let startDate = new Date(endDate);
+            if (timeframe === "3M") {
+                startDate.setMonth(startDate.getMonth() - 3);
+            } else if (timeframe === "6M") {
+                startDate.setMonth(startDate.getMonth() - 6);
+            } else {
+                startDate.setFullYear(startDate.getFullYear() - 1);
+            }
+            data = data.filter(d => parseDate(d.date) >= startDate);
+
+            xScale.domain(d3.extent(data, d => parseDate(d.date)));
+            yScale.domain([d3.min(data, d => d.low), d3.max(data, d => d.high)]);
+
+            svg.selectAll(".axis").remove();
+            svg.selectAll(".candlestick").remove();
+            svg.selectAll(".gridline").remove();
+
+            // Add gridlines
+            svg.append("g")
+                .attr("class", "gridline")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(xScale)
+                    .tickSize(-height)
+                    .tickFormat("")
+                );
+
+            svg.append("g")
+                .attr("class", "gridline")
+                .call(d3.axisLeft(yScale)
+                    .tickSize(-width)
+                    .tickFormat("")
+                );
+
+            // Add X Axis
+            svg.append("g")
+                .attr("class", "axis x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis)
+                .selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end");
+
+            // Add Y Axis
+            svg.append("g")
+                .attr("class", "axis y-axis")
+                .call(yAxis)
+                .append("text")
+                .attr("class", "axis-label")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -height / 2)
+                .attr("y", -50)
+                .style("text-anchor", "middle")
+                .text("Price (USD)");
+
+            // Add Candlesticks with transition
+            const candlesticks = svg.selectAll(".candlestick")
+                .data(data, d => d.date);
+
+            candlesticks.enter()
+                .append("line")
+                .attr("class", "candlestick")
+                .attr("x1", d => xScale(parseDate(d.date)))
+                .attr("x2", d => xScale(parseDate(d.date)))
+                .attr("y1", d => yScale(d.low))
+                .attr("y2", d => yScale(d.high))
+                .attr("stroke", d => d.open > d.close ? "#ff6b6b" : "#4ecdc4")
+                .attr("stroke-width", 1.5)
+                .merge(candlesticks)
+                .transition().duration(1000)
+                .attr("x1", d => xScale(parseDate(d.date)))
+                .attr("x2", d => xScale(parseDate(d.date)))
+                .attr("y1", d => yScale(d.low))
+                .attr("y2", d => yScale(d.high));
+
+            candlesticks.exit().remove();
+
+            // Add candle bodies with transition
+            const candleBodies = svg.selectAll(".candle-body")
+                .data(data, d => d.date);
+
+            candleBodies.enter()
+                .append("rect")
+                .attr("class", "candle-body")
+                .attr("x", d => xScale(parseDate(d.date)) - 3)
+                .attr("y", d => yScale(Math.max(d.open, d.close)))
+                .attr("width", 6)
+                .attr("height", d => Math.abs(yScale(d.open) - yScale(d.close)))
+                .attr("fill", d => d.open > d.close ? "#ff6b6b" : "#4ecdc4")
+                .merge(candleBodies)
+                .transition().duration(1000)
+                .attr("x", d => xScale(parseDate(d.date)) - 3)
+                .attr("y", d => yScale(Math.max(d.open, d.close)))
+                .attr("height", d => Math.abs(yScale(d.open) - yScale(d.close)));
+
+            candleBodies.exit().remove();
+
+            // Add hover events for tooltip
+            svg.selectAll(".candlestick, .candle-body")
+                .on("mouseover", function(event, d) {
+                    tooltip.transition().duration(200).style("opacity", 0.9);
+                    tooltip.html(`Date: ${d.date}<br>Open: ${d.open}<br>Close: ${d.close}<br>High: ${d.high}<br>Low: ${d.low}`)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function() {
+                    tooltip.transition().duration(500).style("opacity", 0);
+                });
+        }
+
+        // Zoom function
+        function zoomed({ transform }) {
+            const newXScale = transform.rescaleX(xScale);
+            const newYScale = transform.rescaleY(yScale);
+
+            // Update x-axis ticks dynamically based on zoom level
+            let ticks;
+            if (transform.k > 5) {
+                ticks = d3.timeDay.every(1);
+                xAxis.tickFormat(d3.timeFormat("%b %d, %Y"));
+            } else if (transform.k > 3) {
+                ticks = d3.timeWeek.every(1);
+                xAxis.tickFormat(d3.timeFormat("%b %d, %Y"));
+            } else {
+                ticks = d3.timeMonth.every(1);
+                xAxis.tickFormat(d3.timeFormat("%b %Y"));
+            }
+            xAxis.ticks(ticks);
+
+            svg.select(".x-axis").call(xAxis.scale(newXScale)).selectAll("text").attr("transform", "rotate(-45)").style("text-anchor", "end");
+            svg.select(".y-axis").call(yAxis.scale(newYScale));
+            svg.selectAll(".candlestick")
+                .attr("x1", d => newXScale(parseDate(d.date)))
+                .attr("x2", d => newXScale(parseDate(d.date)))
+                .attr("y1", d => newYScale(d.low))
+                .attr("y2", d => newYScale(d.high));
+            svg.selectAll(".candle-body")
+                .attr("x", d => newXScale(parseDate(d.date)) - 3)
+                .attr("y", d => newYScale(Math.max(d.open, d.close)))
+                .attr("height", d => Math.abs(newYScale(d.open) - newYScale(d.close)));
+        }
+
+        // Setup stock and timeframe selectors
+        const stockSelector = d3.select("#stock-selector");
+        const timeframeSelector = d3.select("#timeframe-selector");
+
+        stockSelector.on("change", function() {
+            updateChart(this.value, timeframeSelector.property("value"));
+        });
+
+        timeframeSelector.on("change", function() {
+            updateChart(stockSelector.property("value"), this.value);
+        });
+
+        // Setup zoom controls
+        d3.select("#zoom-in").on("click", function() {
+            svg.transition().call(zoom.scaleBy, 1.5);
+        });
+
+        d3.select("#zoom-out").on("click", function() {
+            svg.transition().call(zoom.scaleBy, 0.75);
+        });
+
+        d3.select("#reset-zoom").on("click", function() {
+            svg.transition().call(zoom.transform, d3.zoomIdentity);
+        });
+
+        // Initialize chart with AAPL and 1 year timeframe
+        updateChart("AAPL", "1Y");
+    </script>
+</body>
+</html>
